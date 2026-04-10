@@ -1,21 +1,24 @@
+// app/api/vehicles/[id]/route.js — FIXED
+// Same session auth fix as vehicles/route.js
+
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { authDb } from "@/lib/firebase/admin-database"
-import { vehiclesDb } from "@/lib/firebase/admin-database"
+import { authDb, vehiclesDb } from "@/lib/firebase/admin-database"
 import { initAdmin } from "@/lib/firebase/firebase-admin"
 
 initAdmin()
 
 async function getUserFromSession() {
-  const cookiesStore = await cookies()
-  const sessionCookie = cookiesStore.get("session")?.value
-
-  if (!sessionCookie) return null
-
-  const verifyResult = await authDb.verifySessionCookie(sessionCookie)
-  if (!verifyResult.success) return null
-
-  return verifyResult.data
+  try {
+    const cookiesStore = await cookies()
+    const sessionCookie = cookiesStore.get("session")?.value
+    if (!sessionCookie) return null
+    const verifyResult = await authDb.verifySessionCookie(sessionCookie)
+    if (!verifyResult.success) return null
+    return verifyResult.data
+  } catch {
+    return null
+  }
 }
 
 export async function GET(request, { params }) {
@@ -25,21 +28,18 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const vehicleId = params.id
-    const result = await vehiclesDb.getVehicleById(vehicleId)
-
+    const { id } = await params
+    const result = await vehiclesDb.getVehicleById(id)
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 })
     }
 
-    // Check if the vehicle belongs to the user
     if (result.data.userId !== user.uid) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     return NextResponse.json({ success: true, data: result.data })
   } catch (error) {
-    console.error("Error fetching vehicle:", error)
     return NextResponse.json({ error: "Failed to fetch vehicle" }, { status: 500 })
   }
 }
@@ -51,27 +51,24 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const vehicleId = params.id
+    const { id } = await params
     const vehicleData = await request.json()
 
-    // Check if the vehicle belongs to the user
-    const checkResult = await vehiclesDb.getVehicleById(vehicleId)
+    const checkResult = await vehiclesDb.getVehicleById(id)
     if (!checkResult.success) {
       return NextResponse.json({ error: checkResult.error }, { status: 400 })
     }
     if (checkResult.data.userId !== user.uid) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    const result = await vehiclesDb.updateVehicle(vehicleId, vehicleData)
-
+    const result = await vehiclesDb.updateVehicle(id, vehicleData)
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 })
     }
 
     return NextResponse.json({ success: true, data: result.data })
   } catch (error) {
-    console.error("Error updating vehicle:", error)
     return NextResponse.json({ error: "Failed to update vehicle" }, { status: 500 })
   }
 }
@@ -83,26 +80,23 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const vehicleId = params.id
+    const { id } = await params
 
-    // Check if the vehicle belongs to the user
-    const checkResult = await vehiclesDb.getVehicleById(vehicleId)
+    const checkResult = await vehiclesDb.getVehicleById(id)
     if (!checkResult.success) {
       return NextResponse.json({ error: checkResult.error }, { status: 400 })
     }
     if (checkResult.data.userId !== user.uid) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    const result = await vehiclesDb.deleteVehicle(vehicleId)
-
+    const result = await vehiclesDb.deleteVehicle(id)
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Error deleting vehicle:", error)
     return NextResponse.json({ error: "Failed to delete vehicle" }, { status: 500 })
   }
 }

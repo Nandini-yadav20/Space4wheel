@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+  <!-- Selected marker (blue with highlight) -->
+  <defs>
+    <filter id="shadow-selected">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <!-- Map pin body - bright blue -->
+  <path d="M20 2C11.7 2 5 8.7 5 17c0 8 15 21 15 21s15-13 15-21c0-8.3-6.7-15-15-15z" 
+        fill="#3B82F6" 
+        filter="url(#shadow-selected)"/>
+  <!-- Inner circle - white -->
+  <circle cx="20" cy="16" r="5" fill="#ffffff"/>
+  <!-- Highlight on inner circle -->
+  <circle cx="18" cy="14" r="2" fill="#ffffff" opacity="0.6"/>
+</svg>

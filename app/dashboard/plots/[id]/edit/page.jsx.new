@@ -1,3 +1,4 @@
+// app/dashboard/plots/[id]/edit/page.jsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -381,10 +382,13 @@ export default function EditPlotPage() {
                     />
                   </FormControl>
                   <FormDescription>
-                    Add or replace images of your parking plot
+                    Add or replace images of your parking plot. High-quality
+                    images help attract more bookings.
                   </FormDescription>
                   {images.length === 0 && (
-                    <FormMessage>Please keep at least one image</FormMessage>
+                    <FormMessage>
+                      Please keep at least one image
+                    </FormMessage>
                   )}
                 </FormItem>
 
@@ -423,7 +427,8 @@ export default function EditPlotPage() {
             {/* Info Box */}
             <div className="mt-8 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
               <p className="text-sm text-amber-900 dark:text-amber-300">
-                <strong>Note:</strong> Changes will be saved immediately. Your approval status will not change after editing.
+                <strong>Note:</strong> Changes to your plot will be updated immediately.
+                If your plot was previously approved, approval status will not change.
               </p>
             </div>
           </CardContent>

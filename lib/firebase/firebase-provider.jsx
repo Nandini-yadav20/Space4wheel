@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { initializeApp, getApps, getApp } from "firebase/app"
 import { getDatabase } from "firebase/database"
+import { getFirestore } from "firebase/firestore"
 import { getStorage } from "firebase/storage"
 import { getAuth } from "firebase/auth"
 import { firebaseConfig } from "./firebase-config"
@@ -12,6 +13,7 @@ const FirebaseContext = createContext(null)
 export function FirebaseProvider({ children }) {
   const [firebaseApp, setFirebaseApp] = useState(null)
   const [database, setDatabase] = useState(null)
+  const [firestore, setFirestore] = useState(null)
   const [firebaseStorage, setFirebaseStorage] = useState(null)
   const [firebaseAuth, setFirebaseAuth] = useState(null)
   const [isInitialized, setIsInitialized] = useState(false)
@@ -32,11 +34,13 @@ export function FirebaseProvider({ children }) {
       }
 
       const db = getDatabase(app)
+      const fs = getFirestore(app)
       const storage = getStorage(app)
       const auth = getAuth(app)
 
       setFirebaseApp(app)
       setDatabase(db)
+      setFirestore(fs)
       setFirebaseStorage(storage)
       setFirebaseAuth(auth)
       setIsInitialized(true)
@@ -52,6 +56,7 @@ export function FirebaseProvider({ children }) {
       value={{
         app: firebaseApp,
         db: database,
+        firestore,
         storage: firebaseStorage,
         auth: firebaseAuth,
         isInitialized,
@@ -88,4 +93,9 @@ export const useStorage = () => {
 export const useAuth = () => {
   const { auth } = useFirebase()
   return auth
+}
+
+export const useFirestore = () => {
+  const { firestore } = useFirebase()
+  return firestore
 }

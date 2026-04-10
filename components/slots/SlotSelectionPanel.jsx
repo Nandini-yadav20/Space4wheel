@@ -1,66 +1,75 @@
 "use client"
 
-import { useState, useCallback } from "react"
+/**
+ * components/slots/SlotSelectionPanel.jsx — FIXED
+ *
+ * Bugs fixed:
+ *  1. HoldTimer used useState(() => setInterval(...)) — intervals must live
+ *     in useEffect, not useState. Fixed with useEffect + useRef.
+ *  2. Added null guard: if db is not ready, show a friendly message instead
+ *     of crashing.
+ *  3. useEffect import added (was missing).
+ */
+
+import { useState, useCallback, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { SlotGrid } from "./SlotGrid"
 import { useSlotAvailability, SLOT_STATUS } from "@/lib/hooks/useSlotAvailability"
 import { useToast } from "@/components/ui/use-toast"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
-  Car,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  MapPin,
-  IndianRupee,
-  Zap,
-  Accessibility,
-  Info,
-  Timer,
+  Car, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
+  MapPin, IndianRupee, Zap, Accessibility, Info, WifiOff,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
 
 const SLOT_TYPE_LABELS = {
-  standard: { label: "Standard", surcharge: 0, Icon: Car },
-  compact: { label: "Compact", surcharge: -10, Icon: Car },
-  accessible: { label: "Accessible", surcharge: 0, Icon: Accessibility },
-  ev: { label: "EV Charging", surcharge: 30, Icon: Zap },
+  standard:   { label: "Standard",    surcharge: 0,   Icon: Car          },
+  compact:    { label: "Compact",     surcharge: -10, Icon: Car          },
+  accessible: { label: "Accessible",  surcharge: 0,   Icon: Accessibility },
+  ev:         { label: "EV Charging", surcharge: 30,  Icon: Zap          },
 }
 
-// Countdown timer for hold expiry
+const HOLD_TTL_S = 10 * 60
+
+// ── Countdown timer ────────────────────────────────────────────────────────────
 function HoldTimer({ heldAt }) {
-  const HOLD_TTL_S = 10 * 60
   const [remaining, setRemaining] = useState(() => {
     if (!heldAt) return HOLD_TTL_S
     return Math.max(0, HOLD_TTL_S - Math.floor((Date.now() - heldAt) / 1000))
   })
 
-  // Simple interval-based countdown
-  useState(() => {
-    const id = setInterval(() => {
-      setRemaining((prev) => Math.max(0, prev - 1))
+  // ✅ FIX: use useEffect (not useState) for side effects with cleanup
+  const intervalRef = useRef(null)
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(intervalRef.current)
+          return 0
+        }
+        return prev - 1
+      })
     }, 1000)
-    return () => clearInterval(id)
-  })
+    return () => clearInterval(intervalRef.current)
+  }, []) // run once on mount
 
-  const mins = Math.floor(remaining / 60)
-  const secs = remaining % 60
-  const pct = (remaining / HOLD_TTL_S) * 100
+  const mins   = Math.floor(remaining / 60)
+  const secs   = remaining % 60
+  const pct    = (remaining / HOLD_TTL_S) * 100
   const urgent = remaining < 60
 
   return (
     <div className={cn("flex items-center gap-2 text-xs", urgent ? "text-red-400" : "text-amber-400")}>
+      {/* Circular progress */}
       <div className="relative w-5 h-5 shrink-0">
         <svg viewBox="0 0 20 20" className="w-5 h-5 -rotate-90">
           <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.2" />
           <circle
-            cx="10"
-            cy="10"
-            r="8"
+            cx="10" cy="10" r="8"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
@@ -78,7 +87,7 @@ function HoldTimer({ heldAt }) {
   )
 }
 
-// Selected slot summary card
+// ── Selected slot summary card ─────────────────────────────────────────────────
 function SelectedSlotSummary({ slot, slotKey, basePrice, onRelease }) {
   if (!slot) return null
 
@@ -116,7 +125,6 @@ function SelectedSlotSummary({ slot, slotKey, basePrice, onRelease }) {
         </div>
       </div>
 
-      {/* Hold timer */}
       {slot.heldAt && <HoldTimer heldAt={slot.heldAt} />}
 
       <button
@@ -129,36 +137,18 @@ function SelectedSlotSummary({ slot, slotKey, basePrice, onRelease }) {
   )
 }
 
-/**
- * SlotSelectionPanel
- *
- * Drop-in replacement for the BookNow card in app/dashboard/plots/[id]/page.jsx
- * Renders the full slot picker + booking summary.
- *
- * Props:
- *   plot         – plot object from Firestore
- *   bookingDate  – JS Date
- *   duration     – number (hours)
- *   userId       – authenticated user UID
- *   onProceed    – called with { slotKey, slot, totalPrice } when user proceeds to payment
- */
+// ── Main component ─────────────────────────────────────────────────────────────
 export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProceed }) {
   const { toast } = useToast()
   const [expanded, setExpanded] = useState(true)
 
   const {
-    slots,
-    loading,
-    error,
-    selectedSlotKey,
-    stats,
-    holdSlot,
-    releaseSlot,
-    confirmBooking,
-    setSelectedSlotKey,
+    slots, loading, error,
+    selectedSlotKey, stats,
+    holdSlot, releaseSlot, confirmBooking,
   } = useSlotAvailability({
-    plotId: plot?.id,
-    date: bookingDate,
+    plotId:     plot?.id,
+    date:       bookingDate,
     totalSlots: plot?.totalSlots || 20,
     userId,
   })
@@ -166,52 +156,54 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
   const selectedSlot = selectedSlotKey ? slots[selectedSlotKey] : null
 
   // Price calculation
-  const typeConfig = selectedSlot
-    ? SLOT_TYPE_LABELS[selectedSlot.type] || SLOT_TYPE_LABELS.standard
+  const typeConfig  = selectedSlot
+    ? (SLOT_TYPE_LABELS[selectedSlot.type] || SLOT_TYPE_LABELS.standard)
     : null
-  const surcharge = typeConfig?.surcharge || 0
+  const surcharge   = typeConfig?.surcharge || 0
   const pricePerHour = (plot?.price || 0) + surcharge
-  const totalPrice = pricePerHour * duration
+  const totalPrice   = pricePerHour * (duration || 1)
 
-  const handleSlotClick = useCallback(
-    async (slotKey) => {
-      // Clicking the already-selected slot = deselect
-      if (slotKey === selectedSlotKey) {
-        await releaseSlot(slotKey)
-        return
-      }
-
-      const result = await holdSlot(slotKey)
-      if (!result.success) {
-        toast({
-          variant: "destructive",
-          title: "Slot unavailable",
-          description: result.error || "Someone just grabbed that slot. Please choose another.",
-        })
-      }
-    },
-    [selectedSlotKey, holdSlot, releaseSlot, toast]
-  )
+  const handleSlotClick = useCallback(async (slotKey) => {
+    // Clicking selected slot = deselect
+    if (slotKey === selectedSlotKey) {
+      await releaseSlot(slotKey)
+      return
+    }
+    const result = await holdSlot(slotKey)
+    if (!result.success) {
+      toast({
+        variant: "destructive",
+        title: "Slot unavailable",
+        description: result.error || "Someone just grabbed that slot.",
+      })
+    }
+  }, [selectedSlotKey, holdSlot, releaseSlot, toast])
 
   const handleProceed = useCallback(() => {
     if (!selectedSlot || !selectedSlotKey) return
-    onProceed?.({
-      slotKey: selectedSlotKey,
-      slot: selectedSlot,
-      totalPrice,
-      pricePerHour,
-      confirmBooking,
-    })
+    onProceed?.({ slotKey: selectedSlotKey, slot: selectedSlot, totalPrice, pricePerHour, confirmBooking })
   }, [selectedSlot, selectedSlotKey, totalPrice, pricePerHour, confirmBooking, onProceed])
 
   if (!plot) return null
+
+  // ✅ Guard: RTDB not available
+  if (error?.includes("Realtime database not available")) {
+    return (
+      <Alert variant="destructive">
+        <WifiOff className="h-4 w-4" />
+        <AlertDescription>
+          Real-time slot selection is unavailable. Please enable Firebase Realtime Database in your Firebase console and ensure <code>databaseURL</code> is set in your config.
+        </AlertDescription>
+      </Alert>
+    )
+  }
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden">
       {/* Header */}
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-900/50 transition-colors"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(v => !v)}
       >
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-emerald-900/50 border border-emerald-700/60 flex items-center justify-center">
@@ -220,8 +212,8 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
           <div>
             <p className="text-sm font-semibold text-white">Select Your Slot</p>
             <p className="text-xs text-slate-400">
-              {stats.available} of {stats.total} available
-              {bookingDate && (
+              {loading ? "Loading slots…" : `${stats.available} of ${stats.total} available`}
+              {bookingDate && !loading && (
                 <> · {format(bookingDate, "dd MMM yyyy")}</>
               )}
             </p>
@@ -233,15 +225,13 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
               Slot {selectedSlot?.slotNumber} selected
             </Badge>
           )}
-          {expanded ? (
-            <ChevronUp className="w-4 h-4 text-slate-500" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-slate-500" />
-          )}
+          {expanded
+            ? <ChevronUp className="w-4 h-4 text-slate-500" />
+            : <ChevronDown className="w-4 h-4 text-slate-500" />
+          }
         </div>
       </button>
 
-      {/* Collapsible body */}
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
@@ -280,7 +270,7 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
                 )}
               </AnimatePresence>
 
-              {/* Pricing summary */}
+              {/* Price breakdown */}
               {selectedSlot && (
                 <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-4 space-y-2">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
@@ -292,9 +282,7 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
                   </div>
                   {surcharge !== 0 && (
                     <div className="flex justify-between text-sm text-slate-300">
-                      <span>
-                        {typeConfig?.label} surcharge × {duration} hr{duration > 1 ? "s" : ""}
-                      </span>
+                      <span>{typeConfig?.label} surcharge × {duration} hr{duration > 1 ? "s" : ""}</span>
                       <span className={surcharge > 0 ? "text-amber-400" : "text-emerald-400"}>
                         {surcharge > 0 ? "+" : ""}₹{surcharge * duration}
                       </span>
@@ -313,24 +301,20 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
               {/* CTA */}
               <Button
                 className="w-full h-12 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!selectedSlot || stats.available === 0}
+                disabled={!selectedSlot || loading}
                 onClick={handleProceed}
               >
-                {!selectedSlot ? (
-                  <>
-                    <Info className="w-4 h-4 mr-2 opacity-70" />
-                    Select a slot to continue
-                  </>
+                {loading ? (
+                  <><Clock className="w-4 h-4 mr-2 animate-spin" />Loading slots…</>
+                ) : !selectedSlot ? (
+                  <><Info className="w-4 h-4 mr-2 opacity-70" />Select a slot to continue</>
                 ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    Proceed to Payment · ₹{totalPrice}
-                  </>
+                  <><CheckCircle2 className="w-4 h-4 mr-2" />Proceed to Payment · ₹{totalPrice}</>
                 )}
               </Button>
 
               <p className="text-center text-[10px] text-slate-600">
-                Slot held for 10 minutes after selection · Real-time availability
+                Slot held for 10 minutes · Live availability updates
               </p>
             </div>
           </motion.div>
