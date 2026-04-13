@@ -1,18 +1,12 @@
 "use client"
 
-/**
- * lib/firebase/auth-context.jsx  — FIXED
- *
- * Root cause of 401 on /api/vehicles (and any cookie-gated API):
- *   The original code called POST /api/auth/login which only VERIFIES the idToken.
- *   It never called POST /api/auth/session, which is the only route that actually
- *   sets the HttpOnly "session" cookie that getUserFromSession() reads.
- *
- * Fix: replace every fetch("/api/auth/login") with fetch("/api/auth/session").
- *      The /api/auth/session route verifies the token AND sets the cookie.
- */
-
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react"
 import { useRouter } from "next/navigation"
 import {
   signInWithEmailAndPassword,
@@ -25,70 +19,98 @@ import {
 } from "firebase/auth"
 import { useFirebase } from "./firebase-provider"
 
-const AuthContext = createContext()
+// ✅ safer default
+const AuthContext = createContext(null)
 
-// ── helper: ensure user doc exists in Firestore ──────────────────────────────
-async function ensureUserDoc(uid, email, displayName) {
-  let res = await fetch(`/api/users/${uid}`)
-  if (res.status === 404) {
-    await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        uid,
-        email,
-        name: displayName || "",
-        role: "user",
-        createdAt: new Date().toISOString(),
-      }),
-    })
-    res = await fetch(`/api/users/${uid}`)
+function mapFirebaseAuthError(err) {
+  const code = err?.code || ""
+  switch (code) {
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+    case "auth/invalid-email":
+      return "Invalid email or password."
+    case "auth/too-many-requests":
+      return "Too many failed attempts. Please try again later."
+    case "auth/network-request-failed":
+      return "Network error. Check your internet connection and try again."
+    default:
+      return err?.message || "Authentication failed."
   }
-  if (!res.ok) return {}
-  return res.json()
 }
 
-// ── helper: create the HttpOnly session cookie via /api/auth/session ─────────
+// ── helper: ensure user doc exists ─────────────────
+async function ensureUserDoc(uid, email, displayName) {
+  try {
+    let res = await fetch(`/api/users/${uid}`)
+
+    if (res.status === 404) {
+      await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          email,
+          name: displayName || "",
+          role: "user",
+          createdAt: new Date().toISOString(),
+        }),
+      })
+
+      res = await fetch(`/api/users/${uid}`)
+    }
+
+    if (!res.ok) return {}
+    return await res.json()
+  } catch (err) {
+    console.error("ensureUserDoc error:", err)
+    return {}
+  }
+}
+
+// ── helper: create session cookie ─────────────────
 async function createServerSession(idToken) {
-  const res = await fetch("/api/auth/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idToken }),
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    console.error("Session creation failed:", res.status, text)
+  try {
+    const res = await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken }),
+    })
+
+    return res.ok
+  } catch (err) {
+    console.error("Session error:", err)
     return false
   }
-  return true
 }
 
 export function AuthProvider({ children }) {
   const { auth, isInitialized } = useFirebase()
-  const [user, setUser]       = useState(null)
+  const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+
   const router = useRouter()
 
-  // ── Auth state listener ────────────────────────────────────────────────────
+  // ── Auth state listener ─────────────────
   useEffect(() => {
-    if (!isInitialized || !auth) return
+   if (!isInitialized || !auth) {
+  setLoading(false)
+  return
+}
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null)
-        setLoading(false)
-        return
-      }
-
       try {
+        if (!firebaseUser) {
+          setUser(null)
+          return
+        }
+
         const idToken = await firebaseUser.getIdToken()
 
-        // ✅ FIX: call /api/auth/session (sets the cookie), not /api/auth/login
         const ok = await createServerSession(idToken)
         if (!ok) {
           await firebaseSignOut(auth)
           setUser(null)
-          setLoading(false)
           return
         }
 
@@ -107,7 +129,7 @@ export function AuthProvider({ children }) {
           profile: userData,
         })
       } catch (err) {
-        console.error("Auth state error:", err)
+        console.error("Auth error:", err)
         setUser(null)
       } finally {
         setLoading(false)
@@ -117,28 +139,33 @@ export function AuthProvider({ children }) {
     return () => unsubscribe()
   }, [auth, isInitialized])
 
-  // ── Sign In ────────────────────────────────────────────────────────────────
+  // ── Sign In ─────────────────
   const signIn = useCallback(async (email, password) => {
     try {
       setLoading(true)
 
-      const credential = await signInWithEmailAndPassword(auth, email, password)
+      if (!auth) {
+        return { success: false, error: "Authentication service is not ready." }
+      }
+
+      const safeEmail = String(email || "").trim().toLowerCase()
+      const safePassword = String(password || "")
+      const credential = await signInWithEmailAndPassword(auth, safeEmail, safePassword)
 
       if (!credential.user.emailVerified) {
         await firebaseSignOut(auth)
         return {
           success: false,
           emailVerificationNeeded: true,
-          email,
-          error: "Please verify your email before logging in.",
+          email: safeEmail,
+          error: "Verify email first",
         }
       }
 
       const idToken = await credential.user.getIdToken()
-
-      // ✅ FIX: /api/auth/session sets the HttpOnly cookie
       const ok = await createServerSession(idToken)
-      if (!ok) throw new Error("Failed to create server session")
+
+      if (!ok) throw new Error("Session failed")
 
       const userData = await ensureUserDoc(
         credential.user.uid,
@@ -148,88 +175,93 @@ export function AuthProvider({ children }) {
 
       const role = userData.role || "user"
 
-      if (role === "admin")       router.push("/admin")
-      else if (role === "owner")  router.push("/dashboard/owner-dashboard")
-      else                        router.push("/dashboard")
+      if (role === "admin") router.push("/admin")
+      else if (role === "owner") router.push("/dashboard/owner-dashboard")
+      else router.push("/dashboard")
 
       return { success: true }
     } catch (err) {
-      console.error("signIn error:", err)
-      return { success: false, error: err.message }
+      console.error("signIn:", err)
+      return { success: false, error: mapFirebaseAuthError(err) }
     } finally {
       setLoading(false)
     }
   }, [auth, router])
 
-  // ── Sign Up ────────────────────────────────────────────────────────────────
+  const resendVerificationEmail = useCallback(async (email, password) => {
+    try {
+      if (!auth) {
+        return { success: false, error: "Authentication service is not ready." }
+      }
+
+      const safeEmail = String(email || "").trim().toLowerCase()
+      const safePassword = String(password || "")
+      const credential = await signInWithEmailAndPassword(auth, safeEmail, safePassword)
+
+      if (credential.user.emailVerified) {
+        await firebaseSignOut(auth)
+        return { success: false, error: "Email is already verified." }
+      }
+
+      await sendEmailVerification(credential.user)
+      await firebaseSignOut(auth)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: mapFirebaseAuthError(err) }
+    }
+  }, [auth])
+
+  // ── Sign Up ─────────────────
   const signUp = useCallback(async (email, password, name, role) => {
     try {
       setLoading(true)
 
       const credential = await createUserWithEmailAndPassword(auth, email, password)
-      const firebaseUser = credential.user
 
-      await updateProfile(firebaseUser, { displayName: name })
-      await sendEmailVerification(firebaseUser)
+      await updateProfile(credential.user, { displayName: name })
+      await sendEmailVerification(credential.user)
 
-      // Create Firestore doc right away (with correct role)
       await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
+          uid: credential.user.uid,
+          email,
           name,
           role: role || "user",
           createdAt: new Date().toISOString(),
         }),
       })
 
-      // Sign out — they must verify email first
       await firebaseSignOut(auth)
 
-      return { success: true, emailVerificationSent: true, email }
+      return { success: true }
     } catch (err) {
-      console.error("signUp error:", err)
       return { success: false, error: err.message }
     } finally {
       setLoading(false)
     }
   }, [auth])
 
-  // ── Sign Out ───────────────────────────────────────────────────────────────
+  // ── Sign Out ─────────────────
   const signOut = useCallback(async () => {
     try {
       setLoading(true)
-      // Clear server-side session cookie
       await fetch("/api/auth/logout", { method: "POST" })
       await firebaseSignOut(auth)
       router.push("/")
       return { success: true }
     } catch (err) {
-      console.error("signOut error:", err)
       return { success: false, error: err.message }
     } finally {
       setLoading(false)
     }
   }, [auth, router])
 
-  // ── Reset Password ─────────────────────────────────────────────────────────
+  // ── Reset Password ───────────
   const resetPassword = useCallback(async (email) => {
     try {
       await sendPasswordResetEmail(auth, email)
-      return { success: true }
-    } catch (err) {
-      return { success: false, error: err.message }
-    }
-  }, [auth])
-
-  // ── Resend verification email ──────────────────────────────────────────────
-  const resendVerificationEmail = useCallback(async (email, password) => {
-    try {
-      const credential = await signInWithEmailAndPassword(auth, email, password)
-      await sendEmailVerification(credential.user)
-      await firebaseSignOut(auth)
       return { success: true }
     } catch (err) {
       return { success: false, error: err.message }
@@ -254,4 +286,11 @@ export function AuthProvider({ children }) {
   )
 }
 
-export const useAuth = () => useContext(AuthContext)
+// ✅ SAFE HOOK
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  if (!context) {
+    throw new Error("useAuth must be used within AuthProvider")
+  }
+  return context
+}

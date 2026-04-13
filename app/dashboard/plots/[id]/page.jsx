@@ -227,8 +227,7 @@ export default function PlotDetailPage() {
     const endDate = new Date(startDate)
     endDate.setHours(startDate.getHours() + duration)
 
-    setSlotProceedData({ slotKey, slot, confirmBooking })
-    setBookingDetails({
+    const pendingBooking = {
       plotId: plot.id,
       plotName: plot.name,
       plotAddress: plot.address,
@@ -254,8 +253,16 @@ export default function PlotDetailPage() {
             fuelType: selectedVehicle.fuelType,
           }
         : null,
-    })
-    setBookingStep(2)
+    }
+
+    setSlotProceedData({ slotKey, slot, confirmBooking })
+    setBookingDetails(pendingBooking)
+
+    // Redirect to dedicated payments page after slot selection.
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("pendingSlotBooking", JSON.stringify(pendingBooking))
+    }
+    router.push("/dashboard/payments")
   }
 
   // ── Payment submit ──────────────────────────────────────────────────────────
@@ -284,7 +291,7 @@ export default function PlotDetailPage() {
           bookingId
         )
         if (!slotRes.success) {
-          console.warn("Slot confirm failed (non-fatal):", slotRes.error)
+          throw new Error(slotRes.error || "Could not confirm selected slot. Please try again.")
         }
       }
 

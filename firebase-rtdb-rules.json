@@ -1,0 +1,91 @@
+{
+  "rules": {
+    "plots": {
+      ".read": true,
+      "$plotId": {
+        ".read": true,
+        ".write": "auth != null",
+        "slots": {
+          ".read": true,
+          ".write": "auth != null",
+          "$slotKey": {
+            ".read": true,
+            ".write": "auth != null",
+            ".validate": "newData.hasChildren(['slotNumber', 'status', 'type', 'floor', 'updatedAt']) && newData.child('slotNumber').isNumber() && newData.child('status').val().matches(/^(available|held|booked)$/) && (newData.child('userId').val() === null || newData.child('userId').isString()) && (newData.child('expiresAt').val() === null || newData.child('expiresAt').isNumber()) && (newData.child('bookedAt').val() === null || newData.child('bookedAt').isNumber()) && (newData.child('bookingId').val() === null || newData.child('bookingId').isString()) && newData.child('type').val().matches(/^(standard|compact|accessible|ev)$/) && newData.child('floor').val().matches(/^(Ground|First|Second)$/) && newData.child('updatedAt').isNumber()"
+          }
+        }
+      }
+    },
+    "plotAvailability": {
+      ".read": true,
+      "$plotId": {
+        ".write": "auth != null && (root.child('plots').child($plotId).child('ownerId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+      }
+    },
+    "slot_availability": {
+      ".read": true,
+      "$plotId": {
+        ".read": true,
+        ".write": false,
+        "$dateKey": {
+          ".read": true,
+          ".write": false,
+          "$slotKey": {
+            ".read": true,
+            ".write": "auth != null",
+            ".validate": "newData.hasChildren(['status', 'slotNumber']) && newData.child('status').val().matches(/^(available|held|booked|maintenance)$/) && newData.child('slotNumber').isNumber()",
+            "heldBy": {
+              ".validate": "newData.val() === null || newData.val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin'"
+            },
+            "heldAt": {
+              ".validate": "newData.val() === null || newData.isNumber()"
+            },
+            "bookedBy": {
+              ".validate": "newData.val() === null || newData.val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin'"
+            },
+            "bookedAt": {
+              ".validate": "newData.val() === null || newData.isNumber()"
+            },
+            "bookingId": {
+              ".validate": "newData.val() === null || newData.isString()"
+            },
+            "slotNumber": {
+              ".validate": "newData.isNumber()"
+            },
+            "floor": {
+              ".validate": "newData.val().matches(/^(Ground|First|Second)$/)"
+            },
+            "type": {
+              ".validate": "newData.val().matches(/^(standard|compact|accessible|ev|maintenance)$/)"
+            },
+            "createdAt": {
+              ".validate": "newData.val() === null || newData.isNumber()"
+            },
+            "updatedAt": {
+              ".validate": "newData.val() === null || newData.isNumber()"
+            },
+            ".indexOn": ["status", "heldBy", "heldAt", "bookedBy", "bookedAt"]
+          }
+        }
+      }
+    },
+    "userPresence": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $userId"
+      }
+    },
+    "notifications": {
+      "$userId": {
+        ".read": "auth != null && auth.uid === $userId",
+        ".write": "auth != null && (auth.uid === $userId || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+      }
+    },
+    "user_bookings": {
+      "$userId": {
+        ".read": "auth != null && (auth.uid === $userId || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (auth.uid === $userId || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+      }
+    }
+  }
+}

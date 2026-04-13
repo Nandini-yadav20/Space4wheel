@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { ref, onValue } from "firebase/database"
-import { useDatabase } from "@/lib/firebase/firebase-provider"
+import { useFirebase } from "@/lib/firebase/firebase-provider"
 
 export const useSlots = (plotId = "plot1") => {
-  const db = useDatabase()
+  const { db } = useFirebase()
   const [slots, setSlots] = useState({})
   const [loading, setLoading] = useState(true)
 

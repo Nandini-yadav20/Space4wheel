@@ -10,6 +10,36 @@
 module.exports = {
   rules: {
     // ─────────────────────────────────────────────────────────────────────────────
+    // plots: Plot data including slots structure
+    // ─────────────────────────────────────────────────────────────────────────────
+    plots: {
+      ".read": true,
+      "$plotId": {
+        ".read": true,
+        ".write": "auth != null",
+        "slots": {
+          ".read": true,
+          ".write": "auth != null",
+          "$slotKey": {
+            ".read": true,
+            ".write": "auth != null",
+            ".validate":
+              "newData.hasChildren(['slotNumber', 'status', 'type', 'floor', 'updatedAt']) && " +
+              "newData.child('slotNumber').isNumber() && " +
+              "newData.child('status').val().matches(/^(available|held|booked)$/) && " +
+              "(newData.child('userId').val() === null || newData.child('userId').isString()) && " +
+              "(newData.child('expiresAt').val() === null || newData.child('expiresAt').isNumber()) && " +
+              "(newData.child('bookedAt').val() === null || newData.child('bookedAt').isNumber()) && " +
+              "(newData.child('bookingId').val() === null || newData.child('bookingId').isString()) && " +
+              "newData.child('type').val().matches(/^(standard|compact|accessible|ev)$/) && " +
+              "newData.child('floor').val().matches(/^(Ground|First|Second)$/) && " +
+              "newData.child('updatedAt').isNumber()",
+          },
+        },
+      },
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // plotAvailability: Legacy structure, kept for backward compatibility
     // ─────────────────────────────────────────────────────────────────────────────
     plotAvailability: {
@@ -167,4 +197,3 @@ module.exports = {
     },
   },
 }
-

@@ -1,194 +1,99 @@
 /**
- * functions/src/releaseExpiredSlots.js
+ * functions/src/releaseExpiredSlots.js  (UPDATED)
  *
- * Firebase Cloud Function (Pub/Sub triggered)
- * Runs periodically to release expired slot holds from the server-side
- *
- * Setup:
- * 1. Deploy this function to Firebase Functions
- * 2. Create a Cloud Scheduler job to trigger it via Pub/Sub
- *    - Frequency: Every 1 minute (*/1 * * * *)
- *    - Topic: "release-expired-slots"
+ * Firebase Cloud Function – releases expired slot holds server-side.
+ * Uses the NEW `plots/{plotId}/slots` path (not slot_availability).
  *
  * Deploy:
- *    firebase deploy --only functions:releaseExpiredSlots
+ *   firebase deploy --only functions:releaseExpiredSlots
+ *
+ * Pub/Sub trigger: "release-expired-slots"
+ * Schedule:        every 1 minute via Cloud Scheduler
  */
 
 const functions = require("firebase-functions")
-const admin = require("firebase-admin")
+const admin     = require("firebase-admin")
 
-// Constants
-const HOLD_EXPIRY_MS = 10 * 60 * 1000 // 10 minutes
-const SLOT_STATUS = {
-  AVAILABLE: "available",
-  HELD: "held",
-  BOOKED: "booked",
-  MAINTENANCE: "maintenance",
-}
+if (!admin.apps.length) admin.initializeApp()
 
-/**
- * Cloud Function triggered by Pub/Sub
- * Scans all plots and dates, releasing expired holds
- */
+const HOLD_EXPIRY_MS = 10 * 60 * 1000
+const SLOT_STATUS    = { AVAILABLE: "available", HELD: "held", BOOKED: "booked" }
+
+// ── Pub/Sub triggered (scheduled every 1 minute) ──────────────────────────────
 exports.releaseExpiredSlots = functions.pubsub
   .topic("release-expired-slots")
-  .onPublish(async (message) => {
-    const db = admin.database()
+  .onPublish(async () => {
+    const db  = admin.database()
     const now = Date.now()
-    let released = 0
+    let released  = 0
     let processed = 0
 
     try {
-      console.log("[releaseExpiredSlots] Starting cleanup...")
+      const snap = await db.ref("plots").get()
+      if (!snap.exists()) return { success: true, released: 0 }
 
-      // Get all plots and dates
-      const snapshot = await db.ref("slot_availability").get()
-      if (!snapshot.exists()) {
-        console.log("[releaseExpiredSlots] No slots found")
-        return { success: true, released: 0, processed: 0 }
-      }
+      const plots = snap.val()
 
-      const plotsData = snapshot.val()
+      for (const [plotId, plotData] of Object.entries(plots)) {
+        const slots = plotData.slots || {}
+        for (const [slotKey, slot] of Object.entries(slots)) {
+          processed++
+          if (slot.status !== SLOT_STATUS.HELD || !slot.expiresAt) continue
+          if (slot.expiresAt > now) continue
 
-      // Iterate through each plot
-      for (const [plotId, datesData] of Object.entries(plotsData)) {
-        // Iterate through each date
-        for (const [dateKey, slotsData] of Object.entries(datesData)) {
-          // Iterate through each slot
-          for (const [slotKey, slot] of Object.entries(slotsData)) {
-            processed++
-
-            // Skip if not held or no hold time
-            if (slot.status !== SLOT_STATUS.HELD || !slot.heldAt) continue
-
-            // Skip if hold is still valid
-            if (now - slot.heldAt < HOLD_EXPIRY_MS) continue
-
-            // Release expired hold using transaction
-            try {
-              await db
-                .ref(`slot_availability/${plotId}/${dateKey}/${slotKey}`)
-                .transaction((current) => {
-                  // Double-check it's still expired
-                  if (
-                    !current ||
-                    current.status !== SLOT_STATUS.HELD ||
-                    !current.heldAt ||
-                    now - current.heldAt < HOLD_EXPIRY_MS
-                  ) {
-                    return // abort
-                  }
-
-                  released++
-                  return {
-                    ...current,
-                    status: SLOT_STATUS.AVAILABLE,
-                    heldBy: null,
-                    heldAt: null,
-                    updatedAt: now,
-                  }
-                })
-            } catch (err) {
-              console.error(
-                `[releaseExpiredSlots] Failed to release ${plotId}/${dateKey}/${slotKey}:`,
-                err
-              )
+          // Transaction — safe even under concurrent writes
+          await db.ref(`plots/${plotId}/slots/${slotKey}`).transaction((cur) => {
+            if (!cur || cur.status !== SLOT_STATUS.HELD || cur.expiresAt > now) return
+            released++
+            return {
+              ...cur,
+              status:    SLOT_STATUS.AVAILABLE,
+              userId:    null,
+              expiresAt: null,
+              updatedAt: now,
             }
-          }
+          })
         }
       }
 
-      console.log(
-        `[releaseExpiredSlots] Complete: Released ${released}/${processed} slots`
-      )
+      console.log(`[releaseExpiredSlots] Released ${released}/${processed}`)
       return { success: true, released, processed }
-    } catch (error) {
-      console.error("[releaseExpiredSlots] Error:", error)
-      return { success: false, error: error.message }
+    } catch (err) {
+      console.error("[releaseExpiredSlots]", err)
+      return { success: false, error: err.message }
     }
   })
 
-/**
- * Alternative: Callable function for manual cleanup
- * Usage: firebase.functions().httpsCallable('releaseExpiredSlotsManual')()
- */
-exports.releaseExpiredSlotsManual = functions.https.onCall(
-  async (data, context) => {
-    // Verify user is authenticated and admin
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "Must be authenticated"
-      )
-    }
+// ── HTTP trigger for manual cleanup (admin only) ──────────────────────────────
+exports.releaseExpiredSlotsHttp = functions.https.onRequest(async (req, res) => {
+  // Verify via secret header in production
+  const secret = req.headers["x-admin-secret"]
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" })
+  }
 
-    // Optional: Check if user is admin
-    const db = admin.database()
-    const userRole = await db
-      .ref(`users/${context.auth.uid}/role`)
-      .get()
-      .then((snap) => snap.val())
+  const db  = admin.database()
+  const now = Date.now()
+  let released  = 0
+  let processed = 0
 
-    if (userRole !== "admin") {
-      throw new functions.https.HttpsError("permission-denied", "Must be admin")
-    }
+  const snap = await db.ref("plots").get()
+  if (!snap.exists()) return res.json({ success: true, released: 0 })
 
-    // Run cleanup
-    const now = Date.now()
-    let released = 0
-    let processed = 0
+  const plots = snap.val()
+  for (const [plotId, plotData] of Object.entries(plots)) {
+    const slots = plotData.slots || {}
+    for (const [slotKey, slot] of Object.entries(slots)) {
+      processed++
+      if (slot.status !== SLOT_STATUS.HELD || !slot.expiresAt || slot.expiresAt > now) continue
 
-    try {
-      const snapshot = await db.ref("slot_availability").get()
-      if (!snapshot.exists()) {
-        return { success: true, released: 0, processed: 0 }
-      }
-
-      const plotsData = snapshot.val()
-
-      for (const [plotId, datesData] of Object.entries(plotsData)) {
-        for (const [dateKey, slotsData] of Object.entries(datesData)) {
-          for (const [slotKey, slot] of Object.entries(slotsData)) {
-            processed++
-
-            if (slot.status !== SLOT_STATUS.HELD || !slot.heldAt) continue
-            if (now - slot.heldAt < HOLD_EXPIRY_MS) continue
-
-            try {
-              await db
-                .ref(`slot_availability/${plotId}/${dateKey}/${slotKey}`)
-                .transaction((current) => {
-                  if (
-                    !current ||
-                    current.status !== SLOT_STATUS.HELD ||
-                    !current.heldAt ||
-                    now - current.heldAt < HOLD_EXPIRY_MS
-                  ) {
-                    return
-                  }
-
-                  released++
-                  return {
-                    ...current,
-                    status: SLOT_STATUS.AVAILABLE,
-                    heldBy: null,
-                    heldAt: null,
-                    updatedAt: now,
-                  }
-                })
-            } catch (err) {
-              console.error(
-                `Failed to release ${plotId}/${dateKey}/${slotKey}:`,
-                err
-              )
-            }
-          }
-        }
-      }
-
-      return { success: true, released, processed }
-    } catch (error) {
-      throw new functions.https.HttpsError("internal", error.message)
+      await db.ref(`plots/${plotId}/slots/${slotKey}`).transaction((cur) => {
+        if (!cur || cur.status !== SLOT_STATUS.HELD || cur.expiresAt > now) return
+        released++
+        return { ...cur, status: SLOT_STATUS.AVAILABLE, userId: null, expiresAt: null, updatedAt: now }
+      })
     }
   }
-)
+
+  res.json({ success: true, released, processed })
+})

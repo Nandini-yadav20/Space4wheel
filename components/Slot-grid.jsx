@@ -1,10 +1,10 @@
 "use client"
 
-import { useSlots } from "@/hooks/useSlots"
+import { useSlots } from "@/lib/hooks/useSlots"
 import { bookSlot, releaseSlot } from "@/lib/firebase/slot-actions"
 
 export default function SlotGrid() {
-  const slots = useSlots()
+  const { slots } = useSlots()
 
   const handleClick = (id, status) => {
     if (status === "available") {

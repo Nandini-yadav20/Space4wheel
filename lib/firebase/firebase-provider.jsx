@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useContext, useState, useEffect } from "react"
 import { initializeApp, getApps, getApp } from "firebase/app"
 import { getDatabase } from "firebase/database"
 import { getFirestore } from "firebase/firestore"
@@ -11,57 +11,48 @@ import { firebaseConfig } from "./firebase-config"
 const FirebaseContext = createContext(null)
 
 export function FirebaseProvider({ children }) {
-  const [firebaseApp, setFirebaseApp] = useState(null)
-  const [database, setDatabase] = useState(null)
-  const [firestore, setFirestore] = useState(null)
-  const [firebaseStorage, setFirebaseStorage] = useState(null)
-  const [firebaseAuth, setFirebaseAuth] = useState(null)
+  const [firebase, setFirebase] = useState(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
   useEffect(() => {
     try {
-      console.log("Initializing Firebase with config:", {
-        projectId: firebaseConfig.projectId,
-        databaseURL: firebaseConfig.databaseURL,
-        authDomain: firebaseConfig.authDomain,
-      })
+      // ✅ Initialize only once
+      const app = getApps().length === 0
+        ? initializeApp(firebaseConfig)
+        : getApp()
 
-      let app
-      if (getApps().length === 0) {
-        app = initializeApp(firebaseConfig)
-      } else {
-        app = getApp()
+      // ⚠️ IMPORTANT: ensure databaseURL exists
+      if (!firebaseConfig.databaseURL) {
+        console.error("Firebase databaseURL missing (Realtime DB will fail)")
       }
 
-      const db = getDatabase(app)
-      const fs = getFirestore(app)
-      const storage = getStorage(app)
-      const auth = getAuth(app)
+      const firebaseServices = {
+        app,
+        db: getDatabase(app),
+        firestore: getFirestore(app),
+        storage: getStorage(app),
+        auth: getAuth(app),
+      }
 
-      setFirebaseApp(app)
-      setDatabase(db)
-      setFirestore(fs)
-      setFirebaseStorage(storage)
-      setFirebaseAuth(auth)
+      setFirebase(firebaseServices)
       setIsInitialized(true)
 
-      console.log("Firebase initialized successfully")
     } catch (error) {
       console.error("Firebase Init Error:", error)
     }
   }, [])
 
+  const value = {
+    app: firebase?.app || null,
+    db: firebase?.db || null,
+    firestore: firebase?.firestore || null,
+    storage: firebase?.storage || null,
+    auth: firebase?.auth || null,
+    isInitialized,
+  }
+
   return (
-    <FirebaseContext.Provider
-      value={{
-        app: firebaseApp,
-        db: database,
-        firestore,
-        storage: firebaseStorage,
-        auth: firebaseAuth,
-        isInitialized,
-      }}
-    >
+    <FirebaseContext.Provider value={value}>
       {children}
     </FirebaseContext.Provider>
   )
@@ -69,33 +60,10 @@ export function FirebaseProvider({ children }) {
 
 export const useFirebase = () => {
   const context = useContext(FirebaseContext)
+
   if (!context) {
-    throw new Error("useFirebase must be used within a FirebaseProvider")
+    throw new Error("useFirebase must be used within FirebaseProvider")
   }
+
   return context
-}
-
-export const useFirebaseApp = () => {
-  const { app } = useFirebase()
-  return app
-}
-
-export const useDatabase = () => {
-  const { db } = useFirebase()
-  return db
-}
-
-export const useStorage = () => {
-  const { storage } = useFirebase()
-  return storage
-}
-
-export const useAuth = () => {
-  const { auth } = useFirebase()
-  return auth
-}
-
-export const useFirestore = () => {
-  const { firestore } = useFirebase()
-  return firestore
 }

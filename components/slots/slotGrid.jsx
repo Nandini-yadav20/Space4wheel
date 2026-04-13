@@ -1,16 +1,11 @@
 "use client"
 
 /**
- * components/slots/SlotGrid.jsx — FIXED
- *
- * Bugs fixed:
- *  1. Removed `animate-bounce-slight` class that doesn't exist in Tailwind.
- *  2. Added null/empty guard on slots prop.
- *  3. RefreshCw spinner animation uses correct Tailwind class.
+ * components/slots/SlotGrid.jsx
+ * BookMyShow-style parking slot grid with real-time Firebase Realtime DB
  */
 
 import { useMemo, useState, useCallback } from "react"
-import { motion, AnimatePresence } from "framer-motion"
 import { SLOT_STATUS } from "@/lib/hooks/useSlotAvailability"
 import { cn } from "@/lib/utils"
 import {
@@ -24,10 +19,10 @@ import {
 
 // ── Visual config ─────────────────────────────────────────────────────────────
 const SLOT_TYPE_CONFIG = {
-  standard:   { label: "Standard",    Icon: Car,          width: "w-14" },
-  compact:    { label: "Compact",     Icon: Car,          width: "w-12" },
+  standard:   { label: "Standard",    Icon: Car,           width: "w-14" },
+  compact:    { label: "Compact",     Icon: Car,           width: "w-12" },
   accessible: { label: "Accessible",  Icon: Accessibility, width: "w-14" },
-  ev:         { label: "EV Charging", Icon: Zap,          width: "w-14" },
+  ev:         { label: "EV Charging", Icon: Zap,           width: "w-14" },
 }
 
 const STATUS_STYLES = {
@@ -55,14 +50,6 @@ const STATUS_STYLES = {
     cursor: "cursor-not-allowed",
     ring:   "",
   },
-  [SLOT_STATUS.MAINTENANCE]: {
-    border: "border-slate-700",
-    bg:     "bg-slate-900/60",
-    text:   "text-slate-600",
-    glow:   "",
-    cursor: "cursor-not-allowed",
-    ring:   "",
-  },
 }
 
 // ── Single slot cell ──────────────────────────────────────────────────────────
@@ -83,10 +70,7 @@ function SlotCell({ slotKey, slot, isSelected, isMyHold, onClick }) {
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <motion.button
-            layout
-            whileTap={isInteractable ? { scale: 0.92 } : {}}
-            transition={{ type: "spring", stiffness: 400, damping: 25 }}
+          <button
             onClick={() => isInteractable && onClick(slotKey)}
             aria-label={`Slot ${slot.slotNumber} – ${slot.type} – ${slot.status}`}
             aria-pressed={isSelected}
@@ -125,7 +109,7 @@ function SlotCell({ slotKey, slot, isSelected, isMyHold, onClick }) {
             )}>
               {slot.slotNumber}
             </span>
-          </motion.button>
+          </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="bg-slate-900 border-slate-700 text-slate-100 text-xs">
           <p className="font-semibold">
@@ -199,11 +183,9 @@ function StatsBar({ stats }) {
       </span>
       <div className="flex-1 min-w-[80px]">
         <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-          <motion.div
+          <div
             className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${pctAvailable}%` }}
-            transition={{ duration: 0.6, ease: "easeOut" }}
+            style={{ width: `${pctAvailable}%` }}
           />
         </div>
       </div>
@@ -231,7 +213,7 @@ function FloorSection({ floor, entries, slotsPerRow, selectedSlotKey, userId, on
         {rows.map((row, rowIdx) => (
           <div key={rowIdx} className="flex justify-center gap-2 flex-wrap">
             <span className="w-5 text-[9px] text-slate-600 self-center text-right shrink-0">
-              {String.fromCharCode(65 + rowIdx + (floor === "First" ? 6 : 0))}
+              {String.fromCharCode(65 + rowIdx)}
             </span>
             {row.map(([key, slot]) => (
               <SlotCell
@@ -239,7 +221,7 @@ function FloorSection({ floor, entries, slotsPerRow, selectedSlotKey, userId, on
                 slotKey={key}
                 slot={slot}
                 isSelected={selectedSlotKey === key}
-                isMyHold={slot.heldBy === userId}
+                isMyHold={slot.heldBy === userId || slot.userId === userId}
                 onClick={onSlotClick}
               />
             ))}
@@ -254,14 +236,14 @@ function FloorSection({ floor, entries, slotsPerRow, selectedSlotKey, userId, on
 function LoadingSkeleton({ count }) {
   return (
     <div className="flex flex-wrap justify-center gap-2 py-4">
-      {Array.from({ length: count }).map((_, i) => (
+      {Array.from({ length: Math.min(count, 30) }).map((_, i) => (
         <div key={i} className="w-14 h-14 rounded-md border-2 border-slate-800 bg-slate-900 animate-pulse" />
       ))}
     </div>
   )
 }
 
-// ── Main SlotGrid ─────────────────────────────────────────────────────────────
+// ── Main SlotGrid export ──────────────────────────────────────────────────────
 export function SlotGrid({
   slots = {},
   loading,
@@ -280,7 +262,6 @@ export function SlotGrid({
     []
   )
 
-  // ✅ Guard: slots might be null/undefined on first render
   const safeSlots = slots && typeof slots === "object" ? slots : {}
 
   const grouped = useMemo(() => {
@@ -321,7 +302,7 @@ export function SlotGrid({
       <div className="flex items-center justify-between flex-wrap gap-3">
         <StatsBar stats={stats} />
         <div className="flex items-center gap-2 flex-wrap">
-          {allTypes.map(type => (
+          {allTypes.map(type => SLOT_TYPE_CONFIG[type] && (
             <TypePill
               key={type}
               type={type}
@@ -351,7 +332,7 @@ export function SlotGrid({
 
       {/* Grid */}
       {loading ? (
-        <LoadingSkeleton count={Math.min(stats.total || 20, 20)} />
+        <LoadingSkeleton count={stats.total || 20} />
       ) : (
         <div className="flex flex-col gap-8">
           {floors.map(floor => (
