@@ -9,6 +9,13 @@ export function CountUp({ end, duration = 2000, prefix = "", suffix = "" }) {
   const [hasAnimated, setHasAnimated] = useState(false)
 
   useEffect(() => {
+    const element = countRef.current
+    if (!element || typeof IntersectionObserver === "undefined") {
+      // Fallback for non-observer environments: render final value immediately.
+      setIsVisible(true)
+      return
+    }
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         setIsVisible(entry.isIntersecting)
@@ -16,14 +23,11 @@ export function CountUp({ end, duration = 2000, prefix = "", suffix = "" }) {
       { threshold: 0.1 },
     )
 
-    if (countRef.current) {
-      observer.observe(countRef.current)
-    }
+    observer.observe(element)
 
     return () => {
-      if (countRef.current) {
-        observer.unobserve(countRef.current)
-      }
+      observer.unobserve(element)
+      observer.disconnect()
     }
   }, [])
 

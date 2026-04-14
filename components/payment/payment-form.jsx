@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
+import { Calendar, CreditCard, Loader2, Lock, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, CreditCard, Calendar, Lock } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
 export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) {
@@ -13,85 +13,100 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
   const [expiryDate, setExpiryDate] = useState("")
   const [cvv, setCvv] = useState("")
   const [errors, setErrors] = useState({})
+  const [sdkReady, setSdkReady] = useState(false)
+  const [checkoutError, setCheckoutError] = useState("")
 
   useEffect(() => {
     const script = document.createElement("script")
     script.src = "https://checkout.razorpay.com/v1/checkout.js"
     script.async = true
+    script.onload = () => setSdkReady(true)
+    script.onerror = () => setCheckoutError("Razorpay checkout could not be loaded. Please refresh and try again.")
+
     document.body.appendChild(script)
+
+    return () => {
+      document.body.removeChild(script)
+    }
   }, [])
 
   const formatCardNumber = (value) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "")
-    const matches = v.match(/\d{4,16}/g)
-    const match = (matches && matches[0]) || ""
-    const parts = []
-
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4))
-    }
-
-    return parts.length ? parts.join(" ") : value
+    const sanitized = value.replace(/\s+/g, "").replace(/[^0-9]/g, "")
+    const match = sanitized.match(/\d{1,16}/)?.[0] || ""
+    return match.replace(/(.{4})/g, "$1 ").trim()
   }
 
   const formatExpiryDate = (value) => {
-    const v = value.replace(/\s+/g, "").replace(/[^0-9]/gi, "")
-    return v.length >= 2 ? `${v.substring(0, 2)}/${v.substring(2, 4)}` : v
+    const sanitized = value.replace(/\s+/g, "").replace(/[^0-9]/g, "")
+    if (sanitized.length <= 2) return sanitized
+    return `${sanitized.slice(0, 2)}/${sanitized.slice(2, 4)}`
   }
 
   const validateForm = () => {
-    const newErrors = {}
+    const nextErrors = {}
 
     if (!cardNumber.trim()) {
-      newErrors.cardNumber = "Card number is required"
+      nextErrors.cardNumber = "Card number is required"
     } else if (cardNumber.replace(/\s+/g, "").length !== 16) {
-      newErrors.cardNumber = "Card number must be 16 digits"
+      nextErrors.cardNumber = "Card number must be 16 digits"
     }
 
     if (!cardName.trim()) {
-      newErrors.cardName = "Cardholder name is required"
+      nextErrors.cardName = "Cardholder name is required"
     }
 
     if (!expiryDate.trim()) {
-      newErrors.expiryDate = "Expiry date is required"
+      nextErrors.expiryDate = "Expiry date is required"
     } else if (!/^\d{2}\/\d{2}$/.test(expiryDate)) {
-      newErrors.expiryDate = "Expiry date must be in MM/YY format"
+      nextErrors.expiryDate = "Expiry date must use MM/YY"
     }
 
     if (!cvv.trim()) {
-      newErrors.cvv = "CVV is required"
+      nextErrors.cvv = "CVV is required"
     } else if (!/^\d{3,4}$/.test(cvv)) {
-      newErrors.cvv = "CVV must be 3 or 4 digits"
+      nextErrors.cvv = "CVV must be 3 or 4 digits"
     }
 
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
+    setErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
   }
 
-  const handleCardPayment = (e) => {
-    e.preventDefault()
+  const openCheckout = (options) => {
+    if (!process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID) {
+      setCheckoutError("Razorpay key is missing. Add NEXT_PUBLIC_RAZORPAY_KEY_ID to continue.")
+      return
+    }
+
+    if (!sdkReady || !window.Razorpay) {
+      setCheckoutError("Payment gateway is still loading. Please wait a moment and try again.")
+      return
+    }
+
+    setCheckoutError("")
+    const razorpay = new window.Razorpay(options)
+    razorpay.open()
+  }
+
+  const handleCardPayment = (event) => {
+    event.preventDefault()
     if (!validateForm()) return
 
-    const options = {
+    openCheckout({
       key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
       amount: amount * 100,
       currency: "INR",
-      name: "Vehicle Parking App",
-      description: "Slot Booking Payment",
-      handler: function (response) {
+      name: "Space4Wheels",
+      description: "Parking slot booking",
+      handler(response) {
         onSubmit({
           razorpay_payment_id: response.razorpay_payment_id,
           method: "card",
           cardName,
-          cardNumber: cardNumber.replace(/\s+/g, ""),
-          expiryDate,
-          cvv,
+          cardLast4: cardNumber.replace(/\s+/g, "").slice(-4),
         })
       },
       prefill: {
         name: cardName,
-        email: "test@example.com",
-        contact: "9999999999",
       },
       method: {
         upi: true,
@@ -101,71 +116,68 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
       theme: {
         color: "#0f172a",
       },
-    }
-
-    const rzp = new window.Razorpay(options)
-    rzp.open()
+    })
   }
 
   const handleUPIPayment = () => {
-    const options = {
+    openCheckout({
       key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
       amount: amount * 100,
       currency: "INR",
-      name: "Vehicle Parking App",
-      description: "Slot Booking - UPI Payment",
-      handler: function (response) {
+      name: "Space4Wheels",
+      description: "Parking slot booking",
+      handler(response) {
         onSubmit({
           razorpay_payment_id: response.razorpay_payment_id,
-          method: "upi"
+          method: "upi",
         })
       },
       method: {
         upi: true,
       },
-      prefill: {
-        name: "UPI Customer",
-        email: "test@example.com",
-        contact: "9999999999"
-      },
       theme: {
-        color: "#0f172a"
-      }
-    }
-
-    const rzp = new window.Razorpay(options)
-    rzp.open()
+        color: "#0f172a",
+      },
+    })
   }
 
   return (
     <div className="space-y-6">
-      {/* UPI Payment Block */}
-      <div className="text-center border rounded-lg p-4 shadow-sm">
-        <p className="font-semibold mb-2">Prefer UPI?</p>
-         <div className="flex justify-center gap-4 items-center mb-3">
-    <img src="https://cdn.razorpay.com/app/gpay.svg" alt="GPay" className="h-8 w-8" />
-    <img src="https://cdn.razorpay.com/app/phonepe.svg" alt="PhonePe" className="h-8 w-8" />
-    <img src="https://cdn.razorpay.com/app/paytm.svg" alt="Paytm" className="h-8 w-8" />
-    <img src="https://cdn.razorpay.com/app/bhim.svg" alt="BHIM" className="h-8 w-8" />
-  </div>
+      <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+        <div className="flex items-center gap-2 font-medium">
+          <ShieldCheck className="h-4 w-4 text-emerald-600" />
+          Payment protected by Razorpay
+        </div>
+        <p className="mt-1 text-muted-foreground">
+          Complete payment using UPI or card. Your booking will be finalized after a successful checkout response.
+        </p>
+      </div>
+
+      {checkoutError && <p className="text-sm text-red-500">{checkoutError}</p>}
+
+      <div className="rounded-lg border p-4 text-center shadow-sm">
+        <p className="mb-2 font-semibold">Prefer UPI?</p>
+        <div className="mb-3 flex items-center justify-center gap-4">
+          <img src="https://cdn.razorpay.com/app/gpay.svg" alt="GPay" className="h-8 w-8" />
+          <img src="https://cdn.razorpay.com/app/phonepe.svg" alt="PhonePe" className="h-8 w-8" />
+          <img src="https://cdn.razorpay.com/app/paytm.svg" alt="Paytm" className="h-8 w-8" />
+          <img src="https://cdn.razorpay.com/app/bhim.svg" alt="BHIM" className="h-8 w-8" />
+        </div>
         <Button
           type="button"
           className="w-full bg-green-600 hover:bg-green-700"
           onClick={handleUPIPayment}
+          disabled={processing || !sdkReady}
         >
-          Pay with UPI (GPay / PhonePe / BHIM)
+          Pay with UPI
         </Button>
-        <p className="text-xs text-muted-foreground mt-2">
-          Scan QR or select your UPI app after clicking the button.
+        <p className="mt-2 text-xs text-muted-foreground">
+          Scan QR or choose your UPI app after clicking the button.
         </p>
       </div>
 
-      {/* Divider */}
-      <div className="relative text-center">
-        <div className="my-4 text-sm text-muted-foreground">OR</div>
-      </div>
+      <div className="text-center text-sm text-muted-foreground">OR</div>
 
-      {/* Card Payment Form */}
       <form onSubmit={handleCardPayment} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="cardNumber">Card Number</Label>
@@ -175,7 +187,7 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
               id="cardNumber"
               placeholder="1234 5678 9012 3456"
               value={cardNumber}
-              onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+              onChange={(event) => setCardNumber(formatCardNumber(event.target.value))}
               className="pl-10"
               maxLength={19}
             />
@@ -185,7 +197,12 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
 
         <div className="space-y-2">
           <Label htmlFor="cardName">Cardholder Name</Label>
-          <Input id="cardName" placeholder="John Doe" value={cardName} onChange={(e) => setCardName(e.target.value)} />
+          <Input
+            id="cardName"
+            placeholder="John Doe"
+            value={cardName}
+            onChange={(event) => setCardName(event.target.value)}
+          />
           {errors.cardName && <p className="text-sm text-red-500">{errors.cardName}</p>}
         </div>
 
@@ -198,7 +215,7 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
                 id="expiryDate"
                 placeholder="MM/YY"
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(formatExpiryDate(e.target.value))}
+                onChange={(event) => setExpiryDate(formatExpiryDate(event.target.value))}
                 className="pl-10"
                 maxLength={5}
               />
@@ -214,7 +231,7 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
                 id="cvv"
                 placeholder="123"
                 value={cvv}
-                onChange={(e) => setCvv(e.target.value.replace(/[^0-9]/g, ""))}
+                onChange={(event) => setCvv(event.target.value.replace(/[^0-9]/g, ""))}
                 className="pl-10"
                 maxLength={4}
                 type="password"
@@ -235,21 +252,23 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
                 <Button variant="outline" className="w-full justify-start" type="button" disabled>
                   Apple Pay
                 </Button>
-                <p className="text-xs text-muted-foreground text-center mt-2">Additional payment methods coming soon</p>
+                <p className="mt-2 text-center text-xs text-muted-foreground">
+                  Additional payment methods coming soon
+                </p>
               </div>
             </AccordionContent>
           </AccordionItem>
         </Accordion>
 
-        <div className="pt-2 flex flex-col space-y-2">
-          <Button type="submit" className="w-full" disabled={processing}>
+        <div className="flex flex-col space-y-2 pt-2">
+          <Button type="submit" className="w-full" disabled={processing || !sdkReady}>
             {processing ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Processing...
               </>
             ) : (
-              `Pay ₹${amount.toFixed(2)}`
+              `Pay Rs ${amount.toFixed(2)}`
             )}
           </Button>
           <Button type="button" variant="outline" onClick={onCancel} disabled={processing}>
@@ -257,8 +276,8 @@ export function PaymentForm({ amount, onSubmit, onCancel, processing = false }) 
           </Button>
         </div>
 
-        <div className="text-xs text-center text-muted-foreground">
-          <p>Payment is powered by Razorpay. Use test card details if enabled in test mode.</p>
+        <div className="text-center text-xs text-muted-foreground">
+          Payment is powered by Razorpay. Use test credentials if your project is in test mode.
         </div>
       </form>
     </div>

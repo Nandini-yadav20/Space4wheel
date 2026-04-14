@@ -31,6 +31,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/components/ui/use-toast"
 import { Loader2, AlertCircle, ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api"
 
 
 // Validation schema
@@ -43,6 +44,10 @@ const plotFormSchema = z.object({
     .string()
     .min(10, { message: "Address must be at least 10 characters" })
     .max(255, { message: "Address must be less than 255 characters" }),
+  description: z
+    .string()
+    .min(10, { message: "Description must be at least 10 characters" })
+    .max(500, { message: "Description must be less than 500 characters" }),
   price: z
     .string()
     .refine((val) => !isNaN(parseFloat(val)), {
@@ -60,7 +65,12 @@ const plotFormSchema = z.object({
     .refine((val) => val <= 1000, {
       message: "Total slots cannot exceed 1000",
     }),
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
 })
+
+const mapLibraries = ["places"]
+const defaultLocation = { lat: 22.7196, lng: 75.8577 }
 
 export default function AddPlotPage() {
   const { user } = useAuth()
@@ -70,14 +80,21 @@ export default function AddPlotPage() {
   const [images, setImages] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
+    libraries: mapLibraries,
+  })
 
   const form = useForm({
     resolver: zodResolver(plotFormSchema),
     defaultValues: {
       name: "",
       address: "",
+      description: "",
       price: "",
       totalSlots: "",
+      lat: defaultLocation.lat,
+      lng: defaultLocation.lng,
     },
   })
 
@@ -132,10 +149,13 @@ export default function AddPlotPage() {
       const plotId = await addPlot({
         name: data.name,
         address: data.address,
+        description: data.description,
         price: data.price,
         totalSlots: data.totalSlots,
         ownerId: user.uid,
         images: images,
+        lat: data.lat,
+        lng: data.lng,
       })
 
       toast({
@@ -241,6 +261,26 @@ export default function AddPlotPage() {
                   )}
                 />
 
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Describe amenities, security, covered/open parking, EV options, etc."
+                          {...field}
+                          disabled={isSubmitting}
+                          rows={4}
+                        />
+                      </FormControl>
+                      <FormDescription>This helps users understand what they are booking.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 {/* Price */}
                 <FormField
                   control={form.control}
@@ -291,6 +331,73 @@ export default function AddPlotPage() {
                     </FormItem>
                   )}
                 />
+
+                <div className="space-y-3">
+                  <FormLabel>Google Maps Location</FormLabel>
+                  <FormDescription>
+                    Click on the map to set the exact plot location.
+                  </FormDescription>
+                  {isLoaded ? (
+                    <div className="h-64 w-full overflow-hidden rounded-lg border">
+                      <GoogleMap
+                        mapContainerStyle={{ width: "100%", height: "100%" }}
+                        center={{
+                          lat: Number(form.watch("lat")) || defaultLocation.lat,
+                          lng: Number(form.watch("lng")) || defaultLocation.lng,
+                        }}
+                        zoom={14}
+                        onClick={(event) => {
+                          const lat = event.latLng?.lat()
+                          const lng = event.latLng?.lng()
+                          if (typeof lat === "number" && typeof lng === "number") {
+                            form.setValue("lat", Number(lat.toFixed(6)), { shouldValidate: true })
+                            form.setValue("lng", Number(lng.toFixed(6)), { shouldValidate: true })
+                          }
+                        }}
+                      >
+                        <Marker
+                          position={{
+                            lat: Number(form.watch("lat")) || defaultLocation.lat,
+                            lng: Number(form.watch("lng")) || defaultLocation.lng,
+                          }}
+                        />
+                      </GoogleMap>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+                      Loading map...
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="lat"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Latitude</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.000001" {...field} disabled={isSubmitting} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="lng"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Longitude</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.000001" {...field} disabled={isSubmitting} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
                 {/* Image Upload */}
                 <FormItem>

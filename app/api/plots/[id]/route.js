@@ -29,7 +29,7 @@ export async function PUT(request, { params }) {
     const { id } = await params
     const data = await request.json()
 
-    if (!data.name || !data.address || !data.price || !data.description || !data.totalSlots || !data.ownerId) {
+    if (!data.name || !data.address || !data.price || !data.totalSlots) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 

@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server"
-import { createBooking, getBookingsByUserId } from "@/lib/firebase/admin-database/bookings"
+import { createBooking, getBookingsByUserId, getBookingsByPlotId } from "@/lib/firebase/admin-database/bookings"
 import { updatePlotAvailability } from "@/lib/firebase/admin-database/plots"
 
 export async function GET(request) {
   try {
-    console.log("finction called")
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get("userId")
-    console.log(`Fetching bookings for user: ${userId}`)
-  
-  
-    if (!userId) {
-      return NextResponse.json({ success: false, error: "User ID is required", data: [] }, { status: 400 })
+    const plotId = searchParams.get("plotId")
+
+    if (!userId && !plotId) {
+      return NextResponse.json(
+        { success: false, error: "Either userId or plotId is required", data: [] },
+        { status: 400 },
+      )
     }
 
-    console.log(`Fetching bookings for user: ${userId}`)
-
-    const result = await getBookingsByUserId(userId)
+    const result = userId
+      ? await getBookingsByUserId(userId)
+      : await getBookingsByPlotId(plotId)
 
     if (!result.success) {
       console.error(`Error fetching bookings for user ${userId}:`, result.error)

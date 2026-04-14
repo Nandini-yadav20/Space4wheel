@@ -16,7 +16,7 @@ import {
   Plus, Car, Clock, CreditCard, AlertCircle, TrendingUp,
   Edit2, Eye, MapPin, BarChart3, Calendar, IndianRupee,
   CheckCircle2, XCircle, Hourglass, RefreshCw, ArrowUpRight,
-  Layers, Star, Users,
+  Layers, Star, Users, Trash2,
 } from "lucide-react"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -78,7 +78,7 @@ function StatCard({ icon: Icon, value, label, iconClass, trend }) {
 }
 
 // ── Plot card ─────────────────────────────────────────────────────────────────
-function PlotCard({ plot, bookingCount, revenue }) {
+function PlotCard({ plot, bookingCount, revenue, onDelete }) {
   const imageUrl = plot.images?.[0]
     ? (typeof plot.images[0] === "object" ? plot.images[0].url : plot.images[0])
     : null
@@ -156,12 +156,15 @@ function PlotCard({ plot, bookingCount, revenue }) {
             View
           </Button>
         </Link>
-        <Link href={`/dashboard/plots/${plot.id}/edit`} className="flex-1">
+        <Link href={`/dashboard/plots/${plot.id}/manage`} className="flex-1">
           <Button variant="outline" className="w-full" size="sm">
             <Edit2 className="mr-1.5 h-3.5 w-3.5" />
             Edit
           </Button>
         </Link>
+        <Button variant="destructive" size="sm" onClick={() => onDelete(plot)}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       </CardFooter>
     </Card>
   )
@@ -180,6 +183,7 @@ export default function OwnerDashboard() {
   const [monthlyEarnings, setMonthlyEarnings] = useState({})
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7))
   const [plotBookingMap, setPlotBookingMap]   = useState({}) // plotId → { count, revenue }
+  const [selectedSlotPlotId, setSelectedSlotPlotId] = useState("all")
   const [stats, setStats] = useState({
     totalPlots: 0, pendingPlots: 0, approvedPlots: 0,
     totalBookings: 0, totalRevenue: 0, monthlyRevenue: 0,
@@ -194,7 +198,11 @@ export default function OwnerDashboard() {
       const plotsRes = await fetch(`/api/plots?ownerId=${user.uid}`)
       if (!plotsRes.ok) throw new Error("Failed to fetch plots")
       const plotsData = await plotsRes.json()
-      const plots = Array.isArray(plotsData) ? plotsData : []
+      const plots = Array.isArray(plotsData)
+        ? plotsData
+        : Array.isArray(plotsData?.data)
+          ? plotsData.data
+          : []
       setUserPlots(plots)
 
       const pending  = plots.filter(p => p.approvalStatus === "pending").length
@@ -267,6 +275,28 @@ export default function OwnerDashboard() {
     }
   }, [user, toast])
 
+  const handleDeletePlot = async (plot) => {
+    const confirmed = window.confirm(`Delete "${plot.name}" permanently?`)
+    if (!confirmed) return
+
+    try {
+      const res = await fetch(`/api/plots/${plot.id}`, { method: "DELETE" })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok || payload?.success === false) {
+        throw new Error(payload?.error || "Failed to delete plot")
+      }
+
+      toast({ title: "Plot deleted", description: `${plot.name} was removed successfully.` })
+      fetchOwnerData(true)
+    } catch (error) {
+      toast({
+        title: "Delete failed",
+        description: error?.message || "Could not delete plot",
+        variant: "destructive",
+      })
+    }
+  }
+
   useEffect(() => {
     if (user && user.role !== "owner") {
       router.push(user.role === "admin" ? "/admin" : "/dashboard")
@@ -295,6 +325,23 @@ export default function OwnerDashboard() {
 
   const recentBookings = allBookings.slice(0, 8)
   const monthOptions = Object.keys(monthlyEarnings).sort().reverse()
+  const selectedSlotPlot =
+    selectedSlotPlotId === "all"
+      ? null
+      : userPlots.find((plot) => plot.id === selectedSlotPlotId) || null
+  const selectedSlotsBooked = selectedSlotPlot
+    ? Math.max(0, (selectedSlotPlot.totalSlots || 0) - (selectedSlotPlot.availableSlots ?? selectedSlotPlot.totalSlots ?? 0))
+    : userPlots.reduce((sum, plot) => sum + Math.max(0, (plot.totalSlots || 0) - (plot.availableSlots ?? plot.totalSlots ?? 0)), 0)
+  const selectedSlotsTotal = selectedSlotPlot
+    ? selectedSlotPlot.totalSlots || 0
+    : userPlots.reduce((sum, plot) => sum + (plot.totalSlots || 0), 0)
+  const selectedSlotsAvailable = selectedSlotPlot
+    ? selectedSlotPlot.availableSlots ?? selectedSlotPlot.totalSlots ?? 0
+    : userPlots.reduce((sum, plot) => sum + (plot.availableSlots ?? plot.totalSlots ?? 0), 0)
+  const selectedSlotsHeld = Math.max(0, selectedSlotsTotal - selectedSlotsAvailable - selectedSlotsBooked)
+  const occupancyRate = selectedSlotsTotal > 0
+    ? Math.round((selectedSlotsBooked / selectedSlotsTotal) * 100)
+    : 0
 
   return (
     <div className="container mx-auto py-6 space-y-8">
@@ -388,6 +435,10 @@ export default function OwnerDashboard() {
             <BarChart3 className="h-4 w-4" />
             Earnings
           </TabsTrigger>
+          <TabsTrigger value="slots" className="gap-1.5">
+            <Car className="h-4 w-4" />
+            Slot Management
+          </TabsTrigger>
         </TabsList>
 
         {/* ── PLOTS TAB ── */}
@@ -435,6 +486,7 @@ export default function OwnerDashboard() {
                     plot={plot}
                     bookingCount={plotBookingMap[plot.id]?.count}
                     revenue={plotBookingMap[plot.id]?.revenue}
+                    onDelete={handleDeletePlot}
                   />
                 ))}
 
@@ -606,6 +658,71 @@ export default function OwnerDashboard() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="slots" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle className="text-base">Live Slot Status</CardTitle>
+                  <CardDescription>Track available, booked, and held slots in real time.</CardDescription>
+                </div>
+                <Select value={selectedSlotPlotId} onValueChange={setSelectedSlotPlotId}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Select plot" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All plots</SelectItem>
+                    {userPlots.map((plot) => (
+                      <SelectItem key={plot.id} value={plot.id}>
+                        {plot.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Card>
+                  <CardContent className="pt-6 text-center">
+                    <p className="text-3xl font-bold text-emerald-600">{selectedSlotsAvailable}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Available</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6 text-center">
+                    <p className="text-3xl font-bold text-blue-600">{selectedSlotsBooked}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Booked</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6 text-center">
+                    <p className="text-3xl font-bold text-amber-600">{selectedSlotsHeld}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Held</p>
+                  </CardContent>
+                </Card>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Occupancy Rate</span>
+                  <span className="font-semibold">{occupancyRate}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-500"
+                    style={{ width: `${occupancyRate}%` }}
+                  />
+                </div>
+              </div>
+              {selectedSlotPlot && (
+                <Link href={`/dashboard/plots/${selectedSlotPlot.id}/manage`}>
+                  <Button variant="outline" className="w-full">Manage Selected Plot</Button>
+                </Link>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

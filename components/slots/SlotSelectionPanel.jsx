@@ -128,7 +128,15 @@ function SelectedSlotSummary({ slot, basePrice, onRelease }) {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProceed }) {
+export function SlotSelectionPanel({
+  plot,
+  bookingDate,
+  duration,
+  userId,
+  onProceed,
+  canProceed = true,
+  proceedBlockReason = "",
+}) {
   const { toast } = useToast()
   const [expanded, setExpanded] = useState(true)
 
@@ -166,18 +174,7 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
       })
       return
     }
-
-    const selectedNow = slots?.[slotKey]
-    if (selectedNow) {
-      onProceed?.({
-        slotKey,
-        slot: selectedNow,
-        totalPrice,
-        pricePerHour,
-        confirmBooking,
-      })
-    }
-  }, [selectedSlotKey, holdSlot, releaseSlot, toast, slots, totalPrice, pricePerHour, confirmBooking, onProceed])
+  }, [selectedSlotKey, holdSlot, releaseSlot, toast])
 
   const handleProceed = useCallback(() => {
     if (!selectedSlot || !selectedSlotKey) return
@@ -290,13 +287,15 @@ export function SlotSelectionPanel({ plot, bookingDate, duration, userId, onProc
               {/* CTA */}
               <Button
                 className="w-full h-12 text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                disabled={!selectedSlot || loading}
+                disabled={!selectedSlot || loading || !canProceed}
                 onClick={handleProceed}
               >
                 {loading ? (
                   <><Clock className="w-4 h-4 mr-2 animate-spin" />Loading slots…</>
                 ) : !selectedSlot ? (
                   <><Info className="w-4 h-4 mr-2 opacity-70" />Select a slot to continue</>
+                ) : !canProceed ? (
+                  <><AlertCircle className="w-4 h-4 mr-2" />{proceedBlockReason || "Complete booking details to continue"}</>
                 ) : (
                   <><CheckCircle2 className="w-4 h-4 mr-2" />Proceed to Payment · ₹{totalPrice}</>
                 )}
