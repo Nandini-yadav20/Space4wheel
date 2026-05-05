@@ -19,11 +19,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { PaymentForm } from "@/components/payment/payment-form"
 import { clearCheckoutSession, readCheckoutSession, saveCheckoutSession } from "@/lib/checkout-session"
+import { useAuth } from "@/lib/firebase/auth-context"
 
 export default function PaymentsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { user } = useAuth()
   const [bookingDetails, setBookingDetails] = useState(null)
+  const [bookingId, setBookingId] = useState(null)
   const [processingBooking, setProcessingBooking] = useState(false)
   const [bookingError, setBookingError] = useState(null)
   const [bookingSuccess, setBookingSuccess] = useState(false)
@@ -54,7 +57,39 @@ export default function PaymentsPage() {
 
     setBookingDetails(session)
     setBookingSuccess(session.status === "completed")
-  }, [router, searchParams])
+
+    // Create a preliminary booking if not already created
+    if (!session.preliminaryBookingId && user?.uid) {
+      createPreliminaryBooking(session)
+    } else if (session.preliminaryBookingId) {
+      setBookingId(session.preliminaryBookingId)
+    }
+  }, [router, searchParams, user])
+
+  const createPreliminaryBooking = async (session) => {
+    try {
+      const bookingRes = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...session,
+          status: "pending",
+        }),
+      })
+      const bookingPayload = await bookingRes.json()
+      if (bookingRes.ok && bookingPayload?.success) {
+        const newBookingId = bookingPayload.data.id
+        setBookingId(newBookingId)
+        // Update session with preliminary booking ID
+        saveCheckoutSession({
+          ...session,
+          preliminaryBookingId: newBookingId,
+        })
+      }
+    } catch (error) {
+      console.error("Error creating preliminary booking:", error)
+    }
+  }
 
   useEffect(() => {
     if (!bookingDetails || bookingSuccess) return
@@ -112,24 +147,13 @@ export default function PaymentsPage() {
   }
 
   const handlePaymentSubmit = async (paymentDetails) => {
-    if (!bookingDetails) return
+    if (!bookingDetails || !bookingId) return
 
     try {
       setProcessingBooking(true)
       setBookingError(null)
 
-      const bookingRes = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookingDetails),
-      })
-      const bookingPayload = await bookingRes.json()
-      if (!bookingRes.ok || !bookingPayload?.success) {
-        throw new Error(bookingPayload?.error || "Failed to create booking")
-      }
-
-      const bookingId = bookingPayload.data.id
-
+      // Update booking status from pending to confirmed
       const slotRes = await fetch("/api/slots/operate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,6 +175,7 @@ export default function PaymentsPage() {
         body: JSON.stringify({
           bookingId,
           amount: bookingDetails.totalPrice,
+          userId: user?.uid,
           ...paymentDetails,
         }),
       })
@@ -224,6 +249,8 @@ export default function PaymentsPage() {
             {!bookingSuccess ? (
               <PaymentForm
                 amount={bookingDetails.totalPrice}
+                bookingId={bookingId}
+                userId={user?.uid}
                 onSubmit={handlePaymentSubmit}
                 onCancel={handleCancel}
                 processing={processingBooking}
